@@ -1,0 +1,323 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ──────────────────────────────────────────────
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  ANALYST
+  PARENT
+}
+
+enum Severity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AlertStatus {
+  OPEN
+  INVESTIGATING
+  RESOLVED
+  FALSE_POSITIVE
+  ESCALATED
+}
+
+enum IncidentStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum IncidentPriority {
+  P1
+  P2
+  P3
+  P4
+}
+
+enum DevicePlatform {
+  ANDROID
+  IOS
+  WINDOWS
+  LINUX
+  MACOS
+}
+
+enum EventType {
+  LOGIN
+  LOGOUT
+  FILE_ACCESS
+  NETWORK_CONNECTION
+  APP_INSTALL
+  APP_UNINSTALL
+  SCREENSHOT
+  KEYSTROKE
+  SMS
+  CALL
+  BROWSER_HISTORY
+  LOCATION
+  CAMERA
+  MICROPHONE
+  USB_CONNECTION
+  BLUETOOTH
+  WIFI_CHANGE
+  SYSTEM_ALERT
+  FIREWALL
+  MALWARE_DETECTION
+  DATA_EXFILTRATION
+  PRIVILEGE_ESCALATION
+  CUSTOM
+}
+
+enum ExportFormat {
+  CSV
+  JSON
+  PDF
+}
+
+enum ExportStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum PolicyType {
+  SCREEN_TIME
+  APP_BLOCK
+  CONTENT_FILTER
+  LOCATION_TRACKING
+  KEYWORD_ALERT
+  NETWORK_RESTRICTION
+  TIME_BASED_ACCESS
+}
+
+// ─── Models ─────────────────────────────────────────────
+
+model Tenant {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  slug      String   @unique
+  plan      String   @default("free")
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users     User[]
+  devices   Device[]
+  alerts    Alert[]
+  incidents Incident[]
+  policies  Policy[]
+  auditLogs AuditLog[]
+  exportJobs ExportJob[]
+
+  @@map("tenants")
+}
+
+model User {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @db.Uuid
+  email          String
+  passwordHash   String
+  name           String
+  role           UserRole  @default(ANALYST)
+  isActive       Boolean   @default(true)
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  children       Child[]
+  auditLogs      AuditLog[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("users")
+}
+
+model Child {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  userId      String   @db.Uuid
+  name        String
+  age         Int?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  devices     Device[]
+  policies    Policy[]
+
+  @@index([tenantId])
+  @@index([userId])
+  @@map("children")
+}
+
+model Device {
+  id              String         @id @default(uuid()) @db.Uuid
+  tenantId        String         @db.Uuid
+  childId         String?        @db.Uuid
+  deviceName      String
+  deviceModel     String?
+  platform        DevicePlatform
+  osVersion       String?
+  agentVersion    String?
+  publicKey       String?
+  isActive        Boolean        @default(true)
+  lastSeenAt      DateTime?
+  registeredAt    DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  child           Child?         @relation(fields: [childId], references: [id], onDelete: SetNull)
+  events          Event[]
+  alerts          Alert[]
+
+  @@unique([tenantId, deviceName])
+  @@index([tenantId])
+  @@index([childId])
+  @@map("devices")
+}
+
+model Event {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @db.Uuid
+  deviceId    String    @db.Uuid
+  eventId     String
+  eventType   EventType
+  severity    Severity  @default(LOW)
+  source      String?
+  destination String?
+  payload     Json      @default("{}")
+  rawLog      String?
+  ingestedAt  DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  device      Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  alerts      Alert[]
+
+  @@unique([tenantId, deviceId, eventId])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([tenantId, eventType])
+  @@index([tenantId, severity])
+  @@index([deviceId, createdAt(sort: Desc)])
+  @@map("events")
+}
+
+model Alert {
+  id          String      @id @default(uuid()) @db.Uuid
+  tenantId    String      @db.Uuid
+  deviceId    String      @db.Uuid
+  eventId     String?     @db.Uuid
+  title       String
+  description String?
+  severity    Severity
+  status      AlertStatus @default(OPEN)
+  ruleId      String?
+  metadata    Json        @default("{}")
+  acknowledgedAt DateTime?
+  resolvedAt  DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  device      Device      @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  event       Event?      @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  incidents   Incident[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, severity])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("alerts")
+}
+
+model Incident {
+  id          String          @id @default(uuid()) @db.Uuid
+  tenantId    String          @db.Uuid
+  title       String
+  description String?
+  status      IncidentStatus  @default(IN_PROGRESS)
+  priority    IncidentPriority @default(P3)
+  assignedTo  String?
+  metadata    Json            @default("{}")
+  resolvedAt  DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  alerts      Alert[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("incidents")
+}
+
+model Policy {
+  id          String       @id @default(uuid()) @db.Uuid
+  tenantId    String       @db.Uuid
+  childId     String?      @db.Uuid
+  name        String
+  type        PolicyType
+  config      Json         @default("{}")
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  child       Child?       @relation(fields: [childId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([childId])
+  @@map("policies")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  userId      String   @db.Uuid
+  action      String
+  resource    String
+  resourceId  String?
+  oldValues   Json?
+  newValues   Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([userId])
+  @@map("audit_logs")
+}
+
+model ExportJob {
+  id          String       @id @default(uuid()) @db.Uuid
+  tenantId    String       @db.Uuid
+  userId      String       @db.Uuid
+  format      ExportFormat
+  status      ExportStatus @default(PENDING)
+  filters     Json         @default("{}")
+  fileUrl     String?
+  error       String?
+  createdAt   DateTime     @default(now())
+  completedAt DateTime?
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+  @@map("export_jobs")
+}
