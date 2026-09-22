@@ -115,6 +115,7 @@ model Tenant {
   users      User[]
   children   Child[]
   devices    Device[]
+  events     Event[]
   alerts     Alert[]
   incidents  Incident[]
   policies   Policy[]
