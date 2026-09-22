@@ -112,12 +112,13 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users     User[]
-  devices   Device[]
-  alerts    Alert[]
-  incidents Incident[]
-  policies  Policy[]
-  auditLogs AuditLog[]
+  users      User[]
+  children   Child[]
+  devices    Device[]
+  alerts     Alert[]
+  incidents  Incident[]
+  policies   Policy[]
+  auditLogs  AuditLog[]
   exportJobs ExportJob[]
 
   @@map("tenants")
